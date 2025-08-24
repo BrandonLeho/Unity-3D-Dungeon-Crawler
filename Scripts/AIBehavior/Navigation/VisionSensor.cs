@@ -13,6 +13,9 @@ public class VisionSensor : MonoBehaviour
     [SerializeField] float checkInterval = 0.1f;
     [Tooltip("Penalty to strength at the FOV edge (0 strong, 1 harsh).")]
     [SerializeField, Range(0f, 1f)] float edgeFalloff = 0.4f;
+    [SerializeField] float stickyFovBoost = 40f;   // extra degrees for a short time
+    [SerializeField] float stickyFovTime = 0.75f; // duration after a sighting
+    float stickyUntil;
 
     [Header("Output")]
     public System.Action<AISignal> OnSignal;
@@ -34,6 +37,10 @@ public class VisionSensor : MonoBehaviour
 
     void Scan()
     {
+        float currentAngle = viewAngle;
+        if (Time.time < stickyUntil)
+            currentAngle = Mathf.Min(180f, viewAngle + stickyFovBoost);
+
         var hits = Physics.OverlapSphere(transform.position, viewRadius, targetMask, QueryTriggerInteraction.Ignore);
         if (hits == null || hits.Length == 0) return;
 
@@ -49,17 +56,19 @@ public class VisionSensor : MonoBehaviour
 
             Vector3 dir = to / dist;
             float angle = Vector3.Angle(fwd, dir);
-            if (angle > viewAngle) continue;
+            if (angle > currentAngle) continue;
 
-            // Line-of-sight
+            // Line-of-sight check
             if (Physics.Raycast(eye, dir, out RaycastHit block, dist, obstructionMask, QueryTriggerInteraction.Ignore))
                 continue;
 
-            // Strength: closer + more central = stronger
-            float distFactor = 1f - Mathf.Clamp01(dist / viewRadius);
-            float angleNorm = angle / viewAngle; // 0 center .. 1 edge
-            float angleFactor = 1f - Mathf.Lerp(0f, edgeFalloff, angleNorm);
+            // ✅ This is where you know you actually saw the target
+            stickyUntil = Time.time + stickyFovTime; // extend FOV boost window
 
+            // Strength calc and signal
+            float distFactor = 1f - Mathf.Clamp01(dist / viewRadius);
+            float angleNorm = angle / currentAngle;
+            float angleFactor = 1f - Mathf.Lerp(0f, edgeFalloff, angleNorm);
             float strength = Mathf.Clamp01(distFactor * angleFactor);
 
             Vector3 vel = Vector3.zero;
@@ -69,6 +78,7 @@ public class VisionSensor : MonoBehaviour
             OnSignal?.Invoke(new AISignal(SignalType.Vision, t, t.position, vel, strength, Time.time));
         }
     }
+
 
     void OnDrawGizmosSelected()
     {

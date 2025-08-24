@@ -26,6 +26,31 @@ public class EnemyAIController : MonoBehaviour
     [SerializeField] int breadcrumbsMax = 12;
     [SerializeField] float breadcrumbInterval = 0.8f;
 
+    [Header("Engagement Distances")]
+    [SerializeField] bool usesRangedWeapon = false;
+
+    [Tooltip("Where melee should stop (edge-to-edge), e.g., agent radius + player radius + small margin.")]
+    [SerializeField, Min(0f)] float meleeStopDistance = 1.5f;
+
+    [Tooltip("Ranged units keep between these distances.")]
+    [SerializeField, Min(0f)] float rangedMinDistance = 6f;
+    [SerializeField, Min(0f)] float rangedMaxDistance = 12f;
+
+    [SerializeField] bool orbitWhenInRange = true; // strafe/orbit while in “good” range
+
+    [Header("Target Lock / Proximity")]
+    [SerializeField] float targetLockGrace = 1.25f; // seconds to keep tracking after LOS lost
+    [SerializeField] float proximityRadius = 2.5f;  // 360° “body sense” radius
+    [SerializeField] float proximityGain = 30f;     // suspicion bump if target enters radius
+    [SerializeField] LayerMask targetMask;          // same as VisionSensor.targetMask
+    [SerializeField] LayerMask proximityObstructionMask; // optional; empty = ignore occlusion
+
+    [Header("Facing / Turning")]
+    [SerializeField] bool manualTurnWhenNear = true;
+    [SerializeField] float turnSpeedDegPerSec = 540f; // how fast to turn
+    [SerializeField] float faceWhenWithin = 20f;      // start turning if target within this range
+
+
     [Header("Weights")]
     [SerializeField] float preferRecentSeenSec = 2.0f; // how strongly we prefer fresh vision over stale hearing
 
@@ -116,6 +141,10 @@ public class EnemyAIController : MonoBehaviour
         // Drop breadcrumbs while moving
         if (agent && agent.velocity.sqrMagnitude > 0.2f * 0.2f)
             bb.PushBreadcrumb(transform.position, now, breadcrumbsMax);
+
+        MaintainTargetLock();
+        ProximitySense();
+        FaceTargetIfNeeded();
     }
 
     void HandleSignal(AISignal sig)
@@ -180,11 +209,18 @@ public class EnemyAIController : MonoBehaviour
 
             case AIState.Hunt:
                 {
-                    // If we still have a visible/very recent target, intercept; else move to last known and search
                     float fresh = Time.time - bb.LastSeenTime;
-                    if (bb.LastSeenTime > 0f && fresh < 1.0f)
+
+                    if (bb.CurrentTarget != null && bb.LastSeenTime > 0f && fresh < 1.0f)
                     {
-                        nav.Intercept(bb.LastKnownPos, bb.LastSeenVelocity, agent.speed);
+                        if (usesRangedWeapon)
+                        {
+                            nav.KeepDistanceTo(bb.CurrentTarget, rangedMinDistance, rangedMaxDistance, orbitWhenInRange);
+                        }
+                        else
+                        {
+                            nav.KeepDistanceTo(bb.CurrentTarget, meleeStopDistance, meleeStopDistance + 0.25f, orbitWhenInRange);
+                        }
                     }
                     else if (bb.LastKnownPos != Vector3.zero)
                     {
@@ -202,6 +238,95 @@ public class EnemyAIController : MonoBehaviour
                 }
         }
     }
+
+    void MaintainTargetLock()
+    {
+        // If we saw a specific Transform recently, keep tracking it even if FOV lost.
+        if (bb.CurrentTarget == null) return;
+
+        float sinceSeen = Time.time - bb.LastSeenTime;
+        if (sinceSeen <= targetLockGrace)
+        {
+            // “Sticky vision”: keep last known at the *actual* transform position
+            bb.LastKnownPos = bb.CurrentTarget.position;
+
+            // Optional: keep suspicion from instantly decaying
+            suspicion = Mathf.Min(100f, suspicion + Time.deltaTime * 5f);
+
+            // Predict a little lead while locked
+            var rb = bb.CurrentTarget.GetComponentInParent<Rigidbody>();
+            if (rb) { bb.PredictedPos = bb.CurrentTarget.position + rb.linearVelocity * 0.5f; }
+        }
+    }
+
+    void ProximitySense()
+    {
+        if (proximityRadius <= 0f) return;
+
+        var hits = Physics.OverlapSphere(transform.position, proximityRadius, targetMask, QueryTriggerInteraction.Ignore);
+        if (hits == null || hits.Length == 0) return;
+
+        foreach (var c in hits)
+        {
+            // Optional simple occlusion: ignore if a wall is between us
+            if (proximityObstructionMask.value != 0)
+            {
+                if (Physics.Linecast(transform.position + Vector3.up * 1.6f,
+                                    c.transform.position + Vector3.up * 1.0f,
+                                    proximityObstructionMask, QueryTriggerInteraction.Ignore))
+                    continue;
+            }
+
+            // Treat as a strong "vision-like" ping
+            bb.CurrentTarget = c.transform;
+            bb.LastKnownPos = c.transform.position;
+            bb.LastSeenTime = Time.time;
+
+            // Bump suspicion (stronger up close)
+            float dist = Vector3.Distance(transform.position, c.transform.position);
+            float strength01 = 1f - Mathf.Clamp01(dist / proximityRadius);
+            suspicion = Mathf.Min(100f, suspicion + strength01 * proximityGain);
+            break; // one is enough
+        }
+    }
+
+    void FaceTargetIfNeeded()
+    {
+        if (!manualTurnWhenNear || bb.CurrentTarget == null) return;
+
+        Vector3 to;
+        float dist;
+
+        // Prefer exact Transform while we have a lock, else last known
+        if (Time.time - bb.LastSeenTime <= targetLockGrace)
+        {
+            to = bb.CurrentTarget.position - transform.position;
+            dist = to.magnitude;
+        }
+        else if (bb.LastKnownPos != Vector3.zero)
+        {
+            to = bb.LastKnownPos - transform.position;
+            dist = to.magnitude;
+        }
+        else return;
+
+        to.y = 0f; if (to.sqrMagnitude < 0.0001f) return;
+
+        if (dist <= faceWhenWithin || state == AIState.Hunt)
+        {
+            // Let us rotate even when agent has stopped
+            if (agent) agent.updateRotation = false;
+
+            Quaternion targetRot = Quaternion.LookRotation(to.normalized, Vector3.up);
+            transform.rotation = Quaternion.RotateTowards(
+                transform.rotation, targetRot, turnSpeedDegPerSec * Time.deltaTime);
+        }
+        else
+        {
+            if (agent) agent.updateRotation = true; // let NavMesh steer at long range
+        }
+    }
+
 
     void OnDrawGizmosSelected()
     {

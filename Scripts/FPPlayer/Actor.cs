@@ -13,7 +13,11 @@ public class Actor : MonoBehaviour, IDamageable
             isCrit = true;
         }
 
-        GetComponent<DamageTextSpawner>()?.ShowDamage((int)amount, isCrit);
+        if (amount != 0)
+        {
+            GetComponent<DamageTextSpawner>()?.ShowDamage((int)amount, isCrit);
+        }
+
 
 
         if (Health <= 0f)
@@ -32,7 +36,11 @@ public class Actor : MonoBehaviour, IDamageable
             isCrit = true;
         }
 
-        GetComponent<DamageTextSpawner>()?.ShowDamage((int)amount, isCrit);
+        if (amount != 0)
+        {
+            GetComponent<DamageTextSpawner>()?.ShowDamage((int)amount, isCrit);
+        }
+
 
 
         if (Health <= 0f)

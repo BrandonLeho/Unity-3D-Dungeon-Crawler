@@ -14,6 +14,13 @@ public class EnemyNavigator : MonoBehaviour
     [SerializeField] float searchSpiralStep = 2.0f;
     [SerializeField] int searchSpiralMaxSteps = 12;
 
+    [Header("Personal Space / Ranges")]
+    [SerializeField, Min(0f)] float defaultPersonalSpace = 1.25f; // melee stop distance fallback
+    [SerializeField] float orbitSpeed = 1.5f;   // radians/sec-ish
+    [SerializeField] float orbitJitter = 0.6f;  // randomize the orbit a bit
+    [SerializeField] float sampleMaxDistance = 2.0f; // NavMesh.SamplePosition search radius
+
+
     [Header("Debug")]
     [SerializeField] bool drawGizmos = true;
 
@@ -21,6 +28,10 @@ public class EnemyNavigator : MonoBehaviour
     Vector3 anchor;
     int spiralIndex;
     readonly List<Vector3> spiralCache = new();
+
+    float orbitPhase; // unique per enemy
+    void Awake() { orbitPhase = Random.value * 10f; }
+
 
     void Reset()
     {
@@ -127,6 +138,72 @@ public class EnemyNavigator : MonoBehaviour
         float timeToReach = Vector3.Distance(shooterPos, targetPos) / Mathf.Max(shooterSpeed, eps);
         return targetPos + targetVel * timeToReach;
     }
+
+    bool SampleAndSet(Vector3 worldPos)
+    {
+        if (NavMesh.SamplePosition(worldPos, out var hit, sampleMaxDistance, NavMesh.AllAreas))
+        {
+            agent.SetDestination(hit.position);
+            return true;
+        }
+        return false;
+    }
+
+    public void KeepDistanceTo(Transform target, float minDistance, float maxDistance, bool orbitInBand)
+    {
+        if (!agent || !target) return;
+
+        // Clamp and set stopping distance so the agent stops *before* touching
+        minDistance = Mathf.Max(minDistance, 0.01f);
+        if (maxDistance < minDistance) maxDistance = minDistance;
+        agent.stoppingDistance = minDistance;
+
+        Vector3 me = transform.position;
+        Vector3 tp = target.position;
+        Vector3 flatDir = (tp - me); flatDir.y = 0f;
+        float d = flatDir.magnitude;
+
+        // Choose a desired point on the ring around the target at 'minDistance'
+        if (d < minDistance - 0.05f)
+        {
+            // Too close → back up to ring
+            Vector3 dir = (me - tp).normalized;
+            Vector3 dest = tp + dir * minDistance;
+            SampleAndSet(dest);
+            return;
+        }
+        if (d > maxDistance + 0.05f)
+        {
+            // Too far → move in to ring
+            Vector3 dir = (tp - me).normalized;
+            Vector3 dest = tp - dir * minDistance; // aim just at the inner edge
+            SampleAndSet(dest);
+            return;
+        }
+
+        // In the distance band → either hold or orbit
+        if (orbitInBand)
+        {
+            float radius = Mathf.Lerp(minDistance, maxDistance, 0.6f);
+            float a = orbitPhase + Time.time * orbitSpeed;
+            // wobble the radius/angle for less robotic motion
+            radius += Mathf.Sin(Time.time * 1.7f + orbitPhase) * orbitJitter * 0.25f;
+            float ca = Mathf.Cos(a), sa = Mathf.Sin(a);
+            Vector3 offset = new Vector3(ca, 0f, sa) * radius;
+            Vector3 dest = tp + offset;
+
+            // steer to the orbit point but don't fight if we already have a good path
+            if (!agent.hasPath || agent.remainingDistance > agent.stoppingDistance + 0.25f)
+                SampleAndSet(dest);
+        }
+        else
+        {
+            // Just hold position (let combat system handle facing/attacks)
+            if (agent.hasPath && agent.remainingDistance <= agent.stoppingDistance + 0.05f)
+                agent.ResetPath();
+        }
+    }
+
 
     void OnDrawGizmosSelected()
     {

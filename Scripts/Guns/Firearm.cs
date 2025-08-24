@@ -4,13 +4,12 @@ using TMPro;
 using UnityEngine.InputSystem; // only used to read Mouse button for hold-to-fire
 
 [DisallowMultipleComponent]
-public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional interface below
+public class Firearm : MonoBehaviour, HandItem, IAmmoUser // HandItem is a tiny optional interface below
 {
     [Header("Wiring")]
     [SerializeField] FPController controller;          // auto-filled if missing
     [SerializeField] Transform muzzle;                 // projectile spawn
     [SerializeField] Projectile projectilePrefab;      // projectile
-    [SerializeField] TMP_Text ammoText;               // optional HUD slot
 
     [Header("Fire Mode")]
     [SerializeField] bool allowHoldToFire = true;
@@ -46,6 +45,10 @@ public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional in
     [SerializeField] int magazineSize = 30;
     [SerializeField] float reloadTime = 1.6f;
     [SerializeField] bool autoReload = true;
+    [SerializeField] bool startLoaded = true;  // spawn with a full mag
+    bool hasEverEquipped = false;
+    TMP_Text ammoText; // make this *not* required in the inspector
+
 
     [Header("Recoil")]
     [SerializeField] float recoilPitchPerShot = 1.0f;     // camera pitch up
@@ -63,6 +66,7 @@ public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional in
     bool reloading;
     bool busyBurst;
     float nextShotTime;
+    public bool WantsAmmoUI => true;
     Quaternion cameraRecoilOffset = Quaternion.identity;
     Vector3 gunKick = Vector3.zero;
 
@@ -75,13 +79,29 @@ public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional in
     {
         if (!controller) controller = GetComponentInParent<FPController>();
         if (controller) controller.TryAttack += TryFire;
+
+        // First equip behavior
+        if (!hasEverEquipped)
+        {
+            if (startLoaded) ammo = magazineSize;       // full mag on very first equip
+            reloading = false;                          // never stuck in reload on spawn
+            busyBurst = false;
+            hasEverEquipped = true;
+        }
+
+        StopAllCoroutines(); // just in case we were reloaded while disabled
+        if (ammo <= 0 && autoReload) StartCoroutine(ReloadCo());
+        UpdateAmmoUI();
     }
 
     void OnDisable()
     {
         if (controller) controller.TryAttack -= TryFire;
-        StopAllCoroutines(); // cancel bursts/reloads mid-swap
+        StopAllCoroutines();
+        reloading = false;
+        busyBurst = false;
     }
+
 
 
     void Update()
@@ -104,14 +124,28 @@ public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional in
         transform.localPosition = gunKick;
     }
 
+    public void SetAmmoText(TMP_Text hud)
+    {
+        ammoText = hud;
+        UpdateAmmoUI();            // instant refresh when the weapon becomes active
+    }
+
+
     void TryFire()
     {
-        if (!isActiveAndEnabled || !gameObject.activeInHierarchy) return; // <- prevents the error
+        if (!isActiveAndEnabled || !gameObject.activeInHierarchy) return;
         if (reloading || busyBurst) return;
-        if (ammo <= 0) { if (autoReload) StartCoroutine(ReloadCo()); return; }
+
+        if (ammo <= 0)
+        {
+            if (autoReload) { StartCoroutine(ReloadCo()); UpdateAmmoUI(); }
+            return;
+        }
         if (Time.time < nextShotTime) return;
+
         StartCoroutine(BurstCo());
     }
+
 
 
     IEnumerator BurstCo()
@@ -185,32 +219,6 @@ public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional in
 
         // If mag empty and autoReload, kick it off
         if (ammo <= 0 && autoReload) StartCoroutine(ReloadCo());
-    }
-
-    Vector3 ComputeSpreadDirection(Transform cam, Vector3 targetPoint)
-    {
-        if (spreadDegrees <= 0.0001f && spreadDistanceReference <= 0f)
-            return cam.forward;
-
-        if (spreadDistanceReference > 0f)
-        {
-            // Offset target point in camera's right/up so pattern width is consistent at distance
-            Vector2 off = Random.insideUnitCircle * Mathf.Tan(spreadDegrees * Mathf.Deg2Rad) * spreadDistanceReference;
-            Vector3 right = cam.right, up = cam.up;
-            Vector3 p = targetPoint + right * off.x + up * off.y;
-            return (p - (muzzle ? muzzle.position : cam.position)).normalized;
-        }
-        else
-        {
-            // Pure angular cone
-            Quaternion q = Random.rotationUniform;
-            Vector3 v = q * Vector3.forward;
-            float angle = spreadDegrees * Mathf.Deg2Rad * Random.value;
-            Vector3 axis = Vector3.Cross(Vector3.forward, v).normalized;
-            if (axis.sqrMagnitude < 1e-6f) axis = Vector3.up;
-            Quaternion cone = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, axis);
-            return (cone * cam.forward).normalized;
-        }
     }
 
     Projectile SpawnProjectile(Vector3 origin, Vector3 dir)
@@ -303,6 +311,7 @@ public class Firearm : MonoBehaviour, HandItem // HandItem is a tiny optional in
     {
         if (ammoText) ammoText.text = $"{ammo}/{magazineSize}";
     }
+
 
     void ApplyRecoil()
     {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 
 [DefaultExecutionOrder(+5)]
@@ -13,6 +14,9 @@ public class EquipmentController : MonoBehaviour
     [SerializeField, Min(1)] int maxSlots = 6;
     [SerializeField] bool wrapAround = true;
     [SerializeField] float swapCooldown = 0.12f;
+
+    [Header("HUD")]
+    [SerializeField] TMP_Text sharedAmmoText;
 
     [Header("Starting Items (children allowed)")]
     [SerializeField] List<HandEquipment> startingItems = new();
@@ -68,9 +72,16 @@ public class EquipmentController : MonoBehaviour
             AddOrStack(item);
         }
 
-        // Equip first non-empty slot
         int first = FindNextOccupied(-1, +1);
-        if (first != -1) EquipIndex(first);
+        if (first != -1)
+        {
+            EquipIndex(first);
+            UpdateAmmoHudForCurrent();   // <--- ADD THIS
+        }
+        else
+        {
+            UpdateAmmoHudForNone();      // <--- and this fallback
+        }
 
         // Hook attack so items can respond to your player’s TryAttack
         if (controller != null)
@@ -182,19 +193,75 @@ public class EquipmentController : MonoBehaviour
     {
         if (index == ActiveIndex) return;
 
+        // Unbind old
         if (ActiveIndex != -1 && slots[ActiveIndex] != null)
         {
+            var oldComp = slots[ActiveIndex] as Component;
+            var oldAmmo = (oldComp?.GetComponentInChildren<IAmmoUser>(true));
+            if (oldAmmo != null) oldAmmo.SetAmmoText(null);
+
             var old = slots[ActiveIndex];
             old.OnUnequip();
             OnItemUnequipped?.Invoke(ActiveIndex, old);
         }
 
+        // Equip new
         ActiveIndex = index;
         var cur = slots[ActiveIndex];
         if (cur != null)
         {
             cur.OnEquip();
             OnItemEquipped?.Invoke(ActiveIndex, cur);
+            UpdateAmmoHudForCurrent();      // <- bind to the new item now
+        }
+        else
+        {
+            UpdateAmmoHudForNone();
         }
     }
+
+
+
+
+    void UpdateAmmoHudForCurrent()
+    {
+        if (!sharedAmmoText) return;
+
+        // Active item might be a parent. Search the hierarchy.
+        IAmmoUser ammoUser = null;
+        if (ActiveItem != null)
+        {
+            // Try directly on the equipped component
+            ammoUser = ActiveItem as IAmmoUser;
+
+            // If not found, try on the same GameObject
+            if (ammoUser == null)
+                ammoUser = (ActiveItem as Component)?.GetComponent<IAmmoUser>();
+
+            // If still not found, try children (inactive included in case you enable during OnEquip)
+            if (ammoUser == null && ActiveItem is Component comp)
+                ammoUser = comp.GetComponentInChildren<IAmmoUser>(true);
+        }
+
+        if (ammoUser != null && ammoUser.WantsAmmoUI)
+        {
+            sharedAmmoText.gameObject.SetActive(true);
+            ammoUser.SetAmmoText(sharedAmmoText);
+            // Debug.Log($"[HUD] Bound ammo HUD to {ActiveItem.GetType().Name}");
+        }
+        else
+        {
+            UpdateAmmoHudForNone();
+            // Debug.Log("[HUD] Item has no ammo UI; hiding label.");
+        }
+    }
+
+    void UpdateAmmoHudForNone()
+    {
+        if (!sharedAmmoText) return;
+        sharedAmmoText.text = string.Empty;
+        sharedAmmoText.gameObject.SetActive(false);
+    }
+
+
 }
