@@ -8,7 +8,6 @@ public class EquipmentController : MonoBehaviour
 {
     [Header("Auto-wiring")]
     [SerializeField] FPController controller;   // auto-filled
-    [SerializeField] Transform handSocket;      // created under camera if missing
 
     [Header("Slots")]
     [SerializeField, Min(1)] int maxSlots = 6;
@@ -37,21 +36,6 @@ public class EquipmentController : MonoBehaviour
     {
         if (!controller) controller = GetComponentInParent<FPController>();
         if (!controller) return;
-
-        if (!handSocket && controller.CameraTransform)
-        {
-            var hs = controller.CameraTransform.Find("HandSocket");
-            if (!hs)
-            {
-                var go = new GameObject("HandSocket");
-                hs = go.transform;
-                hs.SetParent(controller.CameraTransform, false);
-                // place slightly forward/right/down to taste:
-                hs.localPosition = new Vector3(0.25f, -0.25f, 0.6f);
-                hs.localRotation = Quaternion.identity;
-            }
-            handSocket = hs;
-        }
     }
 
     void Awake()
@@ -66,8 +50,6 @@ public class EquipmentController : MonoBehaviour
         foreach (var item in startingItems)
         {
             if (!item) continue;
-            if (handSocket && item.transform.parent != handSocket)
-                item.transform.SetParent(handSocket, false);
             item.OnUnequip();
             AddOrStack(item);
         }
@@ -76,16 +58,16 @@ public class EquipmentController : MonoBehaviour
         if (first != -1)
         {
             EquipIndex(first);
-            UpdateAmmoHudForCurrent();   // <--- ADD THIS
+            UpdateAmmoHudForCurrent();
         }
         else
         {
-            UpdateAmmoHudForNone();      // <--- and this fallback
+            UpdateAmmoHudForNone();
         }
 
         // Hook attack so items can respond to your player’s TryAttack
         if (controller != null)
-            controller.TryAttack += OnTryAttack;  // FPController exposes this UnityAction
+            controller.TryAttack += OnTryAttack;
     }
 
     void OnDestroy()
@@ -99,8 +81,6 @@ public class EquipmentController : MonoBehaviour
         ActiveItem?.PrimaryUse();
     }
 
-    // ---------------- Public API ----------------
-
     /// Scroll delta: positive=next, negative=prev
     public void Scroll(float delta)
     {
@@ -108,7 +88,7 @@ public class EquipmentController : MonoBehaviour
         if (Time.time < nextSwapTime) return;
 
         int dir = delta > 0f ? +1 : -1;
-        int next = FindNextOccupied(ActiveIndex, dir);
+        int next = NextIndex(ActiveIndex, dir);
         if (next != -1) EquipIndex(next);
         nextSwapTime = Time.time + swapCooldown;
     }
@@ -117,7 +97,7 @@ public class EquipmentController : MonoBehaviour
     {
         if (Time.time < nextSwapTime) return;
         if (index < 0 || index >= slots.Count) return;
-        if (slots[index] == null || index == ActiveIndex) return;
+        if (index == ActiveIndex) return;
         EquipIndex(index);
         nextSwapTime = Time.time + swapCooldown;
     }
@@ -158,13 +138,9 @@ public class EquipmentController : MonoBehaviour
         if (next != -1) EquipIndex(next);
     }
 
-    // ---------------- Internals ----------------
-
     void PrepareItem(HandEquipment item)
     {
         if (!item) return;
-        if (handSocket && item.transform.parent != handSocket)
-            item.transform.SetParent(handSocket, false);
         item.OnUnequip();
     }
 
@@ -189,6 +165,32 @@ public class EquipmentController : MonoBehaviour
         return -1;
     }
 
+    int NextIndex(int from, int dir)
+    {
+        if (slots.Count == 0) return -1;
+
+        // If nothing is active yet, start just before/after bounds so the first step lands at 0 or last.
+        int i = from;
+        if (i == -1)
+            i = (dir > 0) ? -1 : slots.Count;
+
+        i += dir;
+
+        if (wrapAround)
+        {
+            if (i < 0) i = slots.Count - 1;
+            if (i >= slots.Count) i = 0;
+        }
+        else
+        {
+            // Clamp to ends; if we’re already at an end, stay there
+            i = Mathf.Clamp(i, 0, slots.Count - 1);
+        }
+
+        return i;
+    }
+
+
     void EquipIndex(int index)
     {
         if (index == ActiveIndex) return;
@@ -212,7 +214,7 @@ public class EquipmentController : MonoBehaviour
         {
             cur.OnEquip();
             OnItemEquipped?.Invoke(ActiveIndex, cur);
-            UpdateAmmoHudForCurrent();      // <- bind to the new item now
+            UpdateAmmoHudForCurrent();
         }
         else
         {

@@ -1,9 +1,6 @@
 using Unity.Cinemachine;
-using Unity.VisualScripting;
-using UnityEditor.ShaderGraph.Internal;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.TextCore.Text;
 
 [RequireComponent(typeof(CharacterController))]
 public class FPController : MonoBehaviour
@@ -112,7 +109,9 @@ public class FPController : MonoBehaviour
         CameraUpdate();
 
         // Updating Camera position
-        Vector3 targetCameraPosition = Vector3.up * 1.6f;
+        Vector3 targetCameraPosition = Vector3.up * 0.037f;
+        targetCameraPosition += Vector3.forward * 0.065f;
+        targetCameraPosition += Vector3.right * 0.001f;
 
         if (Activity.IsActive(Crouch))
         {
