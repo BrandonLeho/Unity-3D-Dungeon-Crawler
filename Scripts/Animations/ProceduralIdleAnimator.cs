@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>Whole-body procedural idle animator (zero assets).</summary>
+/// <summary>Whole-body procedural idle animator (zero assets). Fingers moved to ProceduralFingerAnimator.</summary>
 public class ProceduralIdleAnimator : MonoBehaviour
 {
     [Header("Required Transforms")]
@@ -59,43 +59,6 @@ public class ProceduralIdleAnimator : MonoBehaviour
     [Range(0f, 10f)] public float armYawDeg = 2f;   // left/right around local Y
     [Range(0f, 10f)] public float wristDeg = 2f;    // tiny wrist motion
 
-    [Header("Fingers (Left Hand)")]
-    [Tooltip("Add finger bones from knuckle to tip. Include all joints you want to curl.")]
-    public List<Transform> fingerBonesL = new List<Transform>();
-
-    [Header("Fingers (Right Hand)")]
-    public List<Transform> fingerBonesR = new List<Transform>();
-
-    [Header("Fingers: Curl Settings")]
-    [Range(0f, 1f)] public float fingerCurlInput = 0f;      // runtime (0=open, 1=closed grip)
-    [Range(0f, 150f)] public float fingerIdleCurlDeg = 4f;    // gentle idle curl amplitude
-    [Range(0f, 3f)] public float fingerIdleHz = 0.25f;      // idle curl frequency
-    [Range(0f, 150f)] public float fingerMaxCurlDeg = 55f;    // extra curl at input=1
-    [Range(0f, 1f)] public float fingerFalloff = 0.65f;     // <1: distal joints curl less
-    [Range(0.1f, 30f)] public float fingerRotLerp = 12f;       // finger-only smoothing
-    [Tooltip("Tiny noise to avoid perfectly synchronous hands.")]
-    [Range(0f, 4f)] public float fingerMicroDeg = 0.8f;
-
-    [System.Serializable]
-    public struct FingerSpreadEntry
-    {
-        public Transform bone;
-        [Range(-2f, 2f)] public float weight; // +outward, -inward per finger
-    }
-
-    public enum FingerAxis { X, Y, Z }
-
-    [Header("Fingers: Spread Settings")]
-    public List<FingerSpreadEntry> fingerSpreadL = new List<FingerSpreadEntry>();
-    public List<FingerSpreadEntry> fingerSpreadR = new List<FingerSpreadEntry>();
-
-    [Range(0f, 1f)] public float fingerSpreadInput = 0f;    // 0=open, 1=max spread
-    [Range(0f, 15f)] public float fingerIdleSpreadDeg = 1.5f; // subtle idle splay
-    [Range(0f, 45f)] public float fingerMaxSpreadDeg = 12f;   // max splay angle
-    public FingerAxis fingerSpreadAxis = FingerAxis.Y;         // axis to splay around
-    public bool mirrorRightHand = true;                  // mirror sign for right hand
-    [Range(0.1f, 30f)] public float fingerSpreadRotLerp = 12f;  // spread smoothing
-
     [Header("Smoothing")]
     [Range(0.1f, 30f)] public float rotLerp = 10f;
     [Range(0.1f, 30f)] public float posLerp = 10f;
@@ -106,13 +69,6 @@ public class ProceduralIdleAnimator : MonoBehaviour
     Quaternion _uArmL0, _lArmL0, _handL0;
     Quaternion _uArmR0, _lArmR0, _handR0;
 
-    // Baselines for finger bones (mirrors fingerBonesL/R order)
-    List<Quaternion> _fingerBaseL = new List<Quaternion>();
-    List<Quaternion> _fingerBaseR = new List<Quaternion>();
-    List<Quaternion> _fingerSpreadBaseL = new List<Quaternion>();
-    List<Quaternion> _fingerSpreadBaseR = new List<Quaternion>();
-
-    float _fingerSeedL, _fingerSeedR; // desync idle noise per hand
     float _seedX, _seedY, _seedZ;     // per-instance randomization
 
     void Reset()
@@ -146,21 +102,6 @@ public class ProceduralIdleAnimator : MonoBehaviour
         if (upperArmR) _uArmR0 = upperArmR.localRotation;
         if (lowerArmR) _lArmR0 = lowerArmR.localRotation;
         if (handR) _handR0 = handR.localRotation;
-
-        _fingerBaseL.Clear();
-        foreach (var t in fingerBonesL) _fingerBaseL.Add(t ? t.localRotation : Quaternion.identity);
-
-        _fingerBaseR.Clear();
-        foreach (var t in fingerBonesR) _fingerBaseR.Add(t ? t.localRotation : Quaternion.identity);
-
-        _fingerSpreadBaseL.Clear();
-        foreach (var e in fingerSpreadL) _fingerSpreadBaseL.Add(e.bone ? e.bone.localRotation : Quaternion.identity);
-
-        _fingerSpreadBaseR.Clear();
-        foreach (var e in fingerSpreadR) _fingerSpreadBaseR.Add(e.bone ? e.bone.localRotation : Quaternion.identity);
-
-        _fingerSeedL = Random.Range(0f, 1000f);
-        _fingerSeedR = Random.Range(0f, 1000f);
 
         _seedX = Random.Range(0f, 1000f);
         _seedY = Random.Range(0f, 1000f);
@@ -249,96 +190,6 @@ public class ProceduralIdleAnimator : MonoBehaviour
             lowerArmR.localRotation = Quaternion.Slerp(lowerArmR.localRotation, targetL, 1f - Mathf.Exp(-rotLerp * dt));
             handR.localRotation = Quaternion.Slerp(handR.localRotation, targetH, 1f - Mathf.Exp(-rotLerp * dt));
         }
-
-        // Fingers (Idle + Grip)
-        AnimateFingerSet(
-            fingerBonesL, _fingerBaseL,
-            fingerIdlePhase: Mathf.Sin((Time.time + 0.37f) * fingerIdleHz * Mathf.PI * 2f),
-            seed: _fingerSeedL
-        );
-
-        AnimateFingerSet(
-            fingerBonesR, _fingerBaseR,
-            fingerIdlePhase: Mathf.Sin((Time.time + 0.78f) * fingerIdleHz * Mathf.PI * 2f),
-            seed: _fingerSeedR
-        );
-
-        // Finger Spread (Idle + Input)
-        AnimateFingerSpread(
-            fingerSpreadL, _fingerSpreadBaseL,
-            sideSign: +1f,
-            idlePhase: Mathf.Sin((t + 0.13f) * fingerIdleHz * Mathf.PI * 2f)
-        );
-
-        AnimateFingerSpread(
-            fingerSpreadR, _fingerSpreadBaseR,
-            sideSign: (mirrorRightHand ? -1f : +1f),
-            idlePhase: Mathf.Sin((t + 0.21f) * fingerIdleHz * Mathf.PI * 2f)
-        );
-    }
-
-    void AnimateFingerSet(
-        List<Transform> bones,
-        List<Quaternion> baseRots,
-        float fingerIdlePhase,
-        float seed
-    )
-    {
-        if (bones == null || baseRots == null) return;
-
-        float dt = Time.deltaTime;
-        float idleCurl = fingerIdlePhase * fingerIdleCurlDeg;
-        float gripCurl = fingerCurlInput * fingerMaxCurlDeg;
-        float rootCurlDeg = idleCurl + gripCurl;
-
-        for (int i = 0; i < bones.Count && i < baseRots.Count; i++)
-        {
-            var t = bones[i];
-            if (!t) continue;
-
-            float stepMul = Mathf.Pow(fingerFalloff, i);
-            float noise = (Mathf.PerlinNoise(Time.time * 1.1f, seed + i * 0.31f) - 0.5f) * fingerMicroDeg;
-            float curlDeg = (rootCurlDeg * stepMul) + noise;
-
-            Quaternion target = baseRots[i] * Quaternion.Euler(curlDeg, 0f, 0f);
-            t.localRotation = Quaternion.Slerp(t.localRotation, target, 1f - Mathf.Exp(-fingerRotLerp * dt));
-        }
-    }
-
-    Quaternion AxisAngle(FingerAxis axis, float deg)
-    {
-        switch (axis)
-        {
-            case FingerAxis.X: return Quaternion.Euler(deg, 0f, 0f);
-            case FingerAxis.Y: return Quaternion.Euler(0f, deg, 0f);
-            default: return Quaternion.Euler(0f, 0f, deg);
-        }
-    }
-
-    void AnimateFingerSpread(
-        List<FingerSpreadEntry> entries,
-        List<Quaternion> bases,
-        float sideSign,
-        float idlePhase
-    )
-    {
-        if (entries == null || bases == null) return;
-
-        float dt = Time.deltaTime;
-        float idle = idlePhase * fingerIdleSpreadDeg;
-        float input = fingerSpreadInput * fingerMaxSpreadDeg;
-        float spreadDeg = (idle + input) * sideSign;
-
-        for (int i = 0; i < entries.Count && i < bases.Count; i++)
-        {
-            var e = entries[i];
-            if (!e.bone) continue;
-
-            float deg = spreadDeg * e.weight;
-            Quaternion target = bases[i] * AxisAngle(fingerSpreadAxis, deg);
-
-            e.bone.localRotation = Quaternion.Slerp(e.bone.localRotation, target, 1f - Mathf.Exp(-fingerSpreadRotLerp * dt));
-        }
     }
 
     static float Perlin(float t, float seed) => Mathf.PerlinNoise(t, seed);
@@ -372,18 +223,6 @@ public class ProceduralIdleAnimator : MonoBehaviour
         a %= 360f;
         if (a > 180f) a -= 360f;
         return a;
-    }
-
-    [ContextMenu("Capture Current Finger Baselines")]
-    void CaptureFingerBaselines()
-    {
-        _fingerBaseL.Clear();
-        foreach (var t in fingerBonesL) _fingerBaseL.Add(t ? t.localRotation : Quaternion.identity);
-
-        _fingerBaseR.Clear();
-        foreach (var t in fingerBonesR) _fingerBaseR.Add(t ? t.localRotation : Quaternion.identity);
-
-        Debug.Log("[ProceduralIdleAnimator] Captured finger baselines for L/R.");
     }
 #endif
 }

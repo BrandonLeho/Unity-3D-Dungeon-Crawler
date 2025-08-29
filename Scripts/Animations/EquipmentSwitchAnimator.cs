@@ -2,35 +2,35 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-[DefaultExecutionOrder(+25)] // After EquipmentController (+5), before camera render
+[DefaultExecutionOrder(+25)]
 public class EquipmentSwitchAnimator : MonoBehaviour
 {
     [Header("References")]
-    public EquipmentController equipmentController;   // Auto-found if null
-    public Transform handRig;                         // Required: pivot for hand/item assembly
+    public EquipmentController equipmentController;
+    public Transform handRig;
 
     [Header("Motion")]
-    public Vector3 downLocalOffset = new Vector3(0f, -0.22f, 0f);   // Local position offset when down
-    public Vector3 downLocalEuler = new Vector3(12f, 0f, 0f);       // Local rotation offset when down
+    public Vector3 downLocalOffset = new Vector3(0f, -0.22f, 0f);
+    public Vector3 downLocalEuler = new Vector3(12f, 0f, 0f);
 
     [Header("Timing")]
     public float downDuration = 0.12f;
     public float upDuration = 0.14f;
-    public float bottomHold = 0.03f;                               // Delay at bottom
+    public float bottomHold = 0.03f;
 
     [Header("Easing")]
-    [Range(0f, 1f)] public float easeStrength = 1f;                // 0=linear, 1=smooth step
+    [Range(0f, 1f)] public float easeStrength = 1f;
 
     public enum RevealTiming { AtBottom, OnRiseHalf, AtTop }
     [Header("Reveal")]
-    public RevealTiming reveal = RevealTiming.OnRiseHalf;          // When to show new item
+    public RevealTiming reveal = RevealTiming.OnRiseHalf;
 
     [Header("During Swap")]
-    public bool blockAttackDuringSwap = true;                      // Prevent firing/attacks
-    [Range(0f, 1f)] public float swapFingerCurl = 0.1f;            // Temporary reduced finger curl
+    public bool blockAttackDuringSwap = true;
+    [Range(0f, 1f)] public float swapFingerCurl = 0.1f;
 
     [Header("Safety")]
-    public bool interruptible = true;                              // Restart mid-animation if needed
+    public bool interruptible = true;
 
     // Internals
     Vector3 _rigPos0;
@@ -39,7 +39,9 @@ public class EquipmentSwitchAnimator : MonoBehaviour
     Component _renderRootNew;
     List<Renderer> _newItemRenderers = new List<Renderer>();
     bool _isSwapping;
-    ProceduralIdleAnimator _idle; // Optional finger curl driver
+
+    // Optional finger animator
+    ProceduralFingerAnimator _fingers;
 
     void Reset()
     {
@@ -49,7 +51,7 @@ public class EquipmentSwitchAnimator : MonoBehaviour
     void Awake()
     {
         if (!equipmentController) equipmentController = GetComponentInParent<EquipmentController>();
-        _idle = GetComponent<ProceduralIdleAnimator>();
+        _fingers = GetComponent<ProceduralFingerAnimator>();
 
         if (!handRig)
         {
@@ -119,14 +121,20 @@ public class EquipmentSwitchAnimator : MonoBehaviour
     IEnumerator CoSwap(bool startGoingDown)
     {
         _isSwapping = true;
-        float originalCurl = _idle ? _idle.fingerCurlInput : 0f;
+
+        float originalLeftCurl = _fingers ? _fingers.leftCurl : 0f;
+        float originalRightCurl = _fingers ? _fingers.rightCurl : 0f;
 
         if (blockAttackDuringSwap)
         {
             // Example: controller.CanAttack = false; (if available)
         }
 
-        if (_idle) _idle.fingerCurlInput = Mathf.Min(_idle.fingerCurlInput, swapFingerCurl);
+        if (_fingers)
+        {
+            _fingers.leftCurl = Mathf.Min(_fingers.leftCurl, swapFingerCurl);
+            _fingers.rightCurl = Mathf.Min(_fingers.rightCurl, swapFingerCurl);
+        }
 
         // Down
         if (startGoingDown)
@@ -159,8 +167,11 @@ public class EquipmentSwitchAnimator : MonoBehaviour
         RevealNewItemIfNeeded(reveal, RevealTiming.AtTop);
 
         // Restore finger curl & controls
-        if (_idle)
-            _idle.fingerCurlInput = Mathf.Lerp(_idle.fingerCurlInput, originalCurl, 0.5f);
+        if (_fingers)
+        {
+            _fingers.leftCurl = Mathf.Lerp(_fingers.leftCurl, originalLeftCurl, 0.5f);
+            _fingers.rightCurl = Mathf.Lerp(_fingers.rightCurl, originalRightCurl, 0.5f);
+        }
 
         if (blockAttackDuringSwap)
         {
