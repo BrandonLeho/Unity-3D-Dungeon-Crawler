@@ -32,6 +32,16 @@ public class EquipmentController : MonoBehaviour
     void Reset() => AutoWire();
     void OnValidate() => AutoWire();
 
+    bool BlockedBySwitchLock()
+    {
+        if (GameplayLock.Any(LockCategory.EquipmentSwitch))
+        {
+            //Debug.Log("[EquipCtrl] Switch blocked by GameplayLock.");
+            return true;
+        }
+        return false;
+    }
+
     void AutoWire()
     {
         if (!controller) controller = GetComponentInParent<FPController>();
@@ -84,6 +94,7 @@ public class EquipmentController : MonoBehaviour
     /// Scroll delta: positive=next, negative=prev
     public void Scroll(float delta)
     {
+        if (BlockedBySwitchLock()) return;
         if (Mathf.Approximately(delta, 0f)) return;
         if (Time.time < nextSwapTime) return;
 
