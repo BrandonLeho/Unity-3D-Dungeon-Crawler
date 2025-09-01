@@ -8,6 +8,7 @@ public class Player : MonoBehaviour
     [Header("Components")]
     [SerializeField] FPController FPController;
     [SerializeField] EquipmentController equipment;
+    [SerializeField] PlayerPickupInteractor pickupInteractor;
 
     #region Input Handling
 
@@ -46,9 +47,16 @@ public class Player : MonoBehaviour
     {
         if (value.isPressed)
         {
+            // If holding an object via right-click, left-click should THROW and consume this click.
+            if (pickupInteractor != null)
+            {
+                if (pickupInteractor.TryConsumeAttackAsThrow())
+                    return; // consumed by throw; attacking is re-enabled immediately for next click
+                if (pickupInteractor.BlockAttack)
+                    return; // still blocking attacks while holding
+            }
             FPController.TryAttack?.Invoke();
         }
-
     }
 
     void OnScrollWheel(InputValue value)
@@ -56,6 +64,14 @@ public class Player : MonoBehaviour
         if (!equipment) return;
         Vector2 scroll = value.Get<Vector2>();
         equipment.Scroll(scroll.y);  // +y next, -y prev
+    }
+
+    void OnPickup(InputValue value)
+    {
+        if (value.isPressed)
+            pickupInteractor.OnPickupPressed();   // start holding (or try to pick)
+        else
+            pickupInteractor.OnPickupReleased();  // drop on release
     }
 
     #endregion
