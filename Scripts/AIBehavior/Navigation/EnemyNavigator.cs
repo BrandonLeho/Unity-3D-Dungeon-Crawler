@@ -15,7 +15,6 @@ public class EnemyNavigator : MonoBehaviour
     [SerializeField] int searchSpiralMaxSteps = 12;
 
     [Header("Personal Space / Ranges")]
-    [SerializeField, Min(0f)] float defaultPersonalSpace = 1.25f; // melee stop distance fallback
     [SerializeField] float orbitSpeed = 1.5f;   // radians/sec-ish
     [SerializeField] float orbitJitter = 0.6f;  // randomize the orbit a bit
     [SerializeField] float sampleMaxDistance = 2.0f; // NavMesh.SamplePosition search radius

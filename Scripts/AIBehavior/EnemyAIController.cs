@@ -24,7 +24,6 @@ public class EnemyAIController : MonoBehaviour
     [SerializeField] float forgetSeenAfter = 4.0f;
     [SerializeField] float forgetHeardAfter = 6.0f;
     [SerializeField] int breadcrumbsMax = 12;
-    [SerializeField] float breadcrumbInterval = 0.8f;
 
     [Header("Engagement Distances")]
     [SerializeField] bool usesRangedWeapon = false;
